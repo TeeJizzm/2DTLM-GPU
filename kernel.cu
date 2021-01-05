@@ -68,6 +68,8 @@ void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY
     double I = 0, V = 0;
 
     // Parallelisable code
+
+    // for int i = 0; i < NX*NY; i++
     for (int x = 0; x < NX; x++) {
         for (int y = 0; y < NY; y++) {
             I = (2 * V1[(x * NY) + y] + 2 * V4[(x * NY) + y] - 2 * V2[(x * NY) + y] - 2 * V3[(x * NY) + y]) / (4 * Z);
@@ -88,8 +90,26 @@ void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY
 }
 
 __global__ void scatterKernel(double* V1, double* V2, double* V3, double* V4, const int NX, const int NY, const double Z) {
+    // Variables
     double I = 0, V = 0;
+    // Thread identities
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned int stride = blockDim.x * gridDim.x;
+    //*/
+    for (size_t i = tid + stride; i < NX*NY; i += stride) {
+        V = 2 * V1[i] - I * Z;         //port1
+        V1[i] = V - V1[i];
 
+        V = 2 * V2[i] + I * Z;         //port2
+        V2[i] = V - V2[i];
+
+        V = 2 * V3[i] + I * Z;         //port3
+        V3[i] = V - V3[i];
+
+        V = 2 * V4[i] - I * Z;         //port4
+        V4[i] = V - V4[i];
+    
+    }
 }
 
 void stageConnect(double* V1, double* V2, double* V3, double* V4, int NX, int NY, double rXmin, double rXmax, double rYmin, double rYmax) {
