@@ -23,9 +23,19 @@ void checkError(cudaError cudaStatus)
     }
 }
 
-__global__ void zeroesKernel(double* V1, double* v2, double* V3, double* V4) {
-
-
+__global__ void zeroesKernel(double* v1, double* v2, double* v3, double* v4, const int n) {
+    // divide work amongst threads and blocks
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned int stride = blockDim.x * gridDim.x;
+    //*/
+    for (size_t i = tid + stride; i < n; i += stride) {
+        v1[i] = 0;
+        v2[i] = 0;
+        v3[i] = 0;
+        v4[i] = 0;
+        __syncthreads();
+    }
+    //*/
 }
 
 
@@ -44,6 +54,10 @@ void stageSource(double* V1, double* V2, double* V3, double* V4, int x, int y, d
 __global__ void sourceKernel(double* V1, double* V2, double* V3, double* V4, const int x, const int y, const double E0, const int NY) {
     /* Stage 1: Source */
 
+    V1[x * NY + y] = V1[x * NY + y] + E0;
+    V2[x * NY + y] = V2[x * NY + y] - E0;
+    V3[x * NY + y] = V3[x * NY + y] - E0;
+    V4[x * NY + y] = V4[x * NY + y] + E0;
 
     
 } // end func
@@ -71,6 +85,11 @@ void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY
             V4[x * NY + y] = V - V4[x * NY + y];
         }
     }
+}
+
+__global__ void scatterKernel(double* V1, double* V2, double* V3, double* V4, const int NX, const int NY, const double Z) {
+    double I = 0, V = 0;
+
 }
 
 void stageConnect(double* V1, double* V2, double* V3, double* V4, int NX, int NY, double rXmin, double rXmax, double rYmin, double rYmax) {
@@ -112,26 +131,29 @@ int main() {
     std::clock_t start = std::clock();
 
     /* Variables */
+    // Changable variables
+    int NX = 100; // number of X
+    int NY = 100; // number of Y
+    int NT = 8192; // number of Times/Iterations
+    double dl = 1;
+
     cudaError_t cudaStatus;
     cudaStatus = cudaSetDevice(0);
     cudaDeviceProp properties;
     cudaGetDeviceProperties(&properties, 0); // GPU interrogation
 
-    int NX = 100; // number of X
-    int NY = 100; // number of Y
-    int NT = 8192; // number of Times/Iterations
-    double dl = 1;
     double dt = dl / (sqrt(2.) * c);
-
-    /* Turned 2D arrays to 1D
-    // New 1D arrays
-    double* V1 = new double[int(NX * NY)]();
-    double* V2 = new double[int(NX * NY)]();
-    double* V3 = new double[int(NX * NY)]();
-    double* V4 = new double[int(NX * NY)]();
-    // Then moved it to GPU
-    */
-
+    double* v1;
+    double* v2;
+    double* v3;
+    double* v4; // send to GPU
+    
+    // Retrieval from GPU
+    double* V1 = new double[int(NX * NY)];
+    double* V2 = new double[int(NX * NY)];
+    double* V3 = new double[int(NX * NY)];
+    double* V4 = new double[int(NX * NY)];
+    
     // Scatter Coefficient
     double Z = eta0 / sqrt(2.);
 
@@ -141,14 +163,35 @@ int main() {
     double rYmin = -1;
     double rYmax = -1;
 
-    //input / output
+    // input parameters
     double width = 20 * dt * sqrt(2.);
     double delay = 100 * dt * sqrt(2.);
     int Ein[] = { 10,10 };
+    // output parameters
     int Eout[] = { 15,15 };
 
     // file output
     std::ofstream output("output.out");
+
+
+    // Initialise GPU
+    cudaStatus = cudaDeviceSynchronize();
+    checkError(cudaStatus);
+
+    cudaStatus = cudaMalloc(&v1, NX * NY * sizeof(double)); // Memory allocate for points array
+    checkError(cudaStatus);
+    cudaStatus = cudaMalloc(&v2, NX * NY * sizeof(double)); // Memory allocate for points array
+    checkError(cudaStatus);
+    cudaStatus = cudaMalloc(&v3, NX * NY * sizeof(double)); // Memory allocate for points array
+    checkError(cudaStatus);
+    cudaStatus = cudaMalloc(&v4, NX * NY * sizeof(double)); // Memory allocate for points array
+    checkError(cudaStatus);
+
+    cudaStatus = cudaDeviceSynchronize();
+    checkError(cudaStatus);
+
+    // Zero values on GPU - faster than copying array data
+
 
     for (int n = 0; n < NT; n++) {
         // Variables dependant on n
