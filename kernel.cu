@@ -14,6 +14,7 @@
 #define mu0 M_PI*4e-7
 #define eta0 c*mu0
 
+// GPU error checking
 void checkError(cudaError cudaStatus)
 {
     // [--------------- GPU error checking ---------------]
@@ -23,6 +24,7 @@ void checkError(cudaError cudaStatus)
     }
 }
 
+// GPU kernel
 __global__ void zeroesKernel(double* v1, double* v2, double* v3, double* v4, const int n) {
     // divide work amongst threads and blocks
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -36,9 +38,9 @@ __global__ void zeroesKernel(double* v1, double* v2, double* v3, double* v4, con
         __syncthreads();
     }
     //*/
-}
+} // end kern
 
-
+// CPU function for source calculation
 void stageSource(double* V1, double* V2, double* V3, double* V4, int x, int y, double E0, int NY) {
     /* Stage 1: Source */
 
@@ -49,19 +51,9 @@ void stageSource(double* V1, double* V2, double* V3, double* V4, int x, int y, d
     V4[x * NY + y] = V4[x * NY + y] + E0;
     // Using 1 dimensional arrays is more obvious to work with when porting to GPU
 
-}
-
-__global__ void sourceKernel(double* V1, double* V2, double* V3, double* V4, const int x, const int y, const double E0, const int NY) {
-    /* Stage 1: Source */
-
-    V1[x * NY + y] = V1[x * NY + y] + E0;
-    V2[x * NY + y] = V2[x * NY + y] - E0;
-    V3[x * NY + y] = V3[x * NY + y] - E0;
-    V4[x * NY + y] = V4[x * NY + y] + E0;
-
-    
 } // end func
 
+// CPU function
 void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY, double Z) {
     /* Stage 2: Scatter */
     // Variables 
@@ -87,9 +79,18 @@ void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY
             V4[x * NY + y] = V - V4[x * NY + y];
         }
     }
-}
+} // end func
 
-__global__ void scatterKernel(double* V1, double* V2, double* V3, double* V4, const int NX, const int NY, const double Z) {
+// GPU kernel
+__global__ void scatterKernel(double* V1, double* V2, double* V3, double* V4, // Arrays
+                                const int NX, const int NY, const double Z,  // Array arguments + scatter variables
+                                const int Ex, const int Ey, const double E0) { // Source variables
+
+    V1[Ex * NY + Ey] = V1[Ex * NY + Ey] + E0;
+    V2[Ex * NY + Ey] = V2[Ex * NY + Ey] - E0;
+    V3[Ex * NY + Ey] = V3[Ex * NY + Ey] - E0;
+    V4[Ex * NY + Ey] = V4[Ex * NY + Ey] + E0;
+
     // Variables
     double I = 0, V = 0;
     // Thread identities
@@ -110,9 +111,12 @@ __global__ void scatterKernel(double* V1, double* V2, double* V3, double* V4, co
         V4[i] = V - V4[i];
     
     }
-}
+} // end kern
 
-void stageConnect(double* V1, double* V2, double* V3, double* V4, int NX, int NY, double rXmin, double rXmax, double rYmin, double rYmax) {
+// CPU Function
+void stageConnect(double* V1, double* V2, double* V3, double* V4, // Arrays
+                    int NX, int NY, // Array arguments
+                    double rXmin, double rXmax, double rYmin, double rYmax) { // Boundary conditions
     /* Stage 3: Connect */
     // Variables
     double tempV = 0;
@@ -142,9 +146,13 @@ void stageConnect(double* V1, double* V2, double* V3, double* V4, int NX, int NY
         V4[(NX - 1) * NY + y] = rXmax * V4[(NX - 1) * NY + y];
         V2[y] = rXmin * V2[y]; // V2[0 * NY + y] = rXmin * V2[0 * NY + y];
     }
-}
+} // end func
 
-__global__ void connectKernel(double* V1, double* V2, double* V3, double* V4, int NX, int NY, double rXmin, double rXmax, double rYmin, double rYmax) {
+
+// GPU Kernel
+__global__ void connectKernel(double* V1, double* V2, double* V3, double* V4, 
+                                int NX, int NY, 
+                            double rXmin, double rXmax, double rYmin, double rYmax) {
     /* Stage 3: Connect */
     // Variables
     double tempV = 0;
@@ -166,18 +174,18 @@ __global__ void connectKernel(double* V1, double* V2, double* V3, double* V4, in
     }
 
     //*/ // Connect boundaries
-    for (size_t i = tid; i < NX; i += stride) {
-
-
+    for (size_t x = tid; x < NX; x += stride) {
+        V3[x * NY + NY - 1] = rYmax * V3[x * NY + NY - 1];
+        V1[x * NY] = rYmin * V1[x * NY]; // V1[x * NY + 0] = rYmin * V1[x * NY + 0];
     }
-    for (size_t i = tid; i < NY; i += stride) {
-
-
+    for (size_t y = tid; y < NY; y += stride) {
+        V4[(NX - 1) * NY + y] = rXmax * V4[(NX - 1) * NY + y];
+        V2[y] = rXmin * V2[y]; // V2[0 * NY + y] = rXmin * V2[0 * NY + y];
     }
 
     //*/
 
-}
+} // end kern
 
 
 int main() {
@@ -230,7 +238,7 @@ int main() {
     int Eout[] = { 15,15 };
 
     // file output
-    std::ofstream output("output.out");
+    std::ofstream output("CPU.csv");
 
 
     // Initialise GPU
@@ -266,19 +274,28 @@ int main() {
 
         /* Stage 2: Scatter */
         stageScatter(V1, V2, V3, V4, NX, NY, Z);
+        //scatterKernel << <numBlocks, numThreads >> > (v1, v2, v3, v4, NX, NY, Z, Ein[0], Ein[1], E0);
 
         /* Stage 3: Connect */
+        
         stageConnect(V1, V2, V3, V4, NX, NY, rXmin, rXmax, rYmin, rYmax);
+        //connectKernel << <numBlocks, numThreads >> > (V1, V2, V3, V4, NX, NY, rXmin, rXmax, rYmin, rYmax);
 
         output << n * dt << "  " << V2[Eout[0] * NY + Eout[1]] + V4[Eout[0] * NY + Eout[1]] << std::endl;
         if (n % 100 == 0)
             std::cout << n << std::endl;
 
     }
+    cudaFree(v1);
+    cudaFree(v2);
+    cudaFree(v3);
+    cudaFree(v4);
+
     output.close();
     std::cout << "Done: " << ((std::clock() - start) / (double)CLOCKS_PER_SEC) << std::endl;
     std::cin.get();
 
 
-}
+} // end main
 
+// EOF
