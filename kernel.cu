@@ -96,7 +96,7 @@ __global__ void scatterKernel(double* V1, double* V2, double* V3, double* V4, co
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned int stride = blockDim.x * gridDim.x;
     //*/
-    for (size_t i = tid + stride; i < NX*NY; i += stride) {
+    for (size_t i = tid; i < NX*NY; i += stride) {
         V = 2 * V1[i] - I * Z;         //port1
         V1[i] = V - V1[i];
 
@@ -144,6 +144,19 @@ void stageConnect(double* V1, double* V2, double* V3, double* V4, int NX, int NY
     }
 }
 
+__global__ void connectKernel(double* V1, double* V2, double* V3, double* V4, int NX, int NY, double rXmin, double rXmax, double rYmin, double rYmax) {
+    /* Stage 3: Connect */
+    // Variables
+    double tempV = 0;
+    // Thread identities
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned int stride = blockDim.x * gridDim.x;
+    //*/
+    
+
+
+}
+
 
 int main() {
 
@@ -158,9 +171,13 @@ int main() {
     double dl = 1;
 
     cudaError_t cudaStatus;
-    cudaStatus = cudaSetDevice(0);
+    cudaStatus = cudaSetDevice(0); // Error checking
     cudaDeviceProp properties;
     cudaGetDeviceProperties(&properties, 0); // GPU interrogation
+
+     // find no of blocks
+    int numThreads = properties.maxThreadsPerBlock;
+    int numBlocks = ((NX*NY) + numThreads - 1) / numThreads;
 
     double dt = dl / (sqrt(2.) * c);
     double* v1;
