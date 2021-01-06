@@ -191,7 +191,6 @@ __global__ void connectKernel(double* V1, double* V2, double* V3, double* V4,
         V2[y] = rXmin * V2[y]; // V2[0 * NY + y] = rXmin * V2[0 * NY + y];
         __syncthreads();
     }
-
     //*/
 
 } // end kern
@@ -206,7 +205,7 @@ int main() {
     // Changable variables
     int NX = 100; // number of X
     int NY = 100; // number of Y
-    int NT = 10; // number of Times/Iterations
+    int NT = 8192; // number of Times/Iterations
     double dl = 1;
 
     cudaError_t cudaStatus;
@@ -227,7 +226,7 @@ int main() {
     double* gpu_v4;
     
     // Retrieval from GPU
-    //*/
+    /*/
     double* V1 = new double[int(NX * NY)](); // new double[int(NX*NY)](); // Sets all values to 0 
     double* V2 = new double[int(NX * NY)]();
     double* V3 = new double[int(NX * NY)](); 
@@ -304,22 +303,9 @@ int main() {
 
         /* Stage 4: Retrieval */
         //*/
-        // Copy output vector from GPU buffer to host memory.
-        cudaStatus = cudaMemcpy(V1, gpu_v1, NX * NY * sizeof(double), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
-        if (cudaStatus != cudaSuccess) {
-            std::cout << stderr << " :: cudaMemcpy failed!" << std::endl;
-            return cudaStatus;
-        }
         //    std::cout << "cudaMemcpy success" << std::endl;
                 // Copy output vector from GPU buffer to host memory.
         cudaStatus = cudaMemcpy(V2, gpu_v2, NX * NY * sizeof(double), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
-        if (cudaStatus != cudaSuccess) {
-            std::cout << stderr << " :: cudaMemcpy failed!" << std::endl;
-            return cudaStatus;
-        }
-        //    std::cout << "cudaMemcpy success" << std::endl;
-                // Copy output vector from GPU buffer to host memory.
-        cudaStatus = cudaMemcpy(V3, gpu_v3, NX * NY * sizeof(double), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
         if (cudaStatus != cudaSuccess) {
             std::cout << stderr << " :: cudaMemcpy failed!" << std::endl;
             return cudaStatus;
