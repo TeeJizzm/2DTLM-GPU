@@ -206,7 +206,7 @@ int main() {
     // Changable variables
     int NX = 100; // number of X
     int NY = 100; // number of Y
-    int NT = 8192; // number of Times/Iterations
+    int NT = 10; // number of Times/Iterations
     double dl = 1;
 
     cudaError_t cudaStatus;
@@ -227,11 +227,18 @@ int main() {
     double* gpu_v4;
     
     // Retrieval from GPU
-    double* V1 = new double[int(NX * NY)]; // new double[int(NX*NY)](); // Sets all values to 0 
+    //*/
+    double* V1 = new double[int(NX * NY)](); // new double[int(NX*NY)](); // Sets all values to 0 
+    double* V2 = new double[int(NX * NY)]();
+    double* V3 = new double[int(NX * NY)](); 
+    double* V4 = new double[int(NX * NY)]();
+    /*/
+    double* V1 = new double[int(NX * NY)]; // new double[int(NX*NY)]; // Creates array for GPU retrieval
     double* V2 = new double[int(NX * NY)];
-    double* V3 = new double[int(NX * NY)]; // new double[int(NX*NY)]; // Creates array for GPU retrieval
+    double* V3 = new double[int(NX * NY)]; 
     double* V4 = new double[int(NX * NY)];
-    
+    //*/
+
     // Scatter Coefficient
     double Z = eta0 / sqrt(2.);
 
@@ -280,20 +287,23 @@ int main() {
         // Variables dependant on n
         double E0 = (1 / sqrt(2.)) * exp(-(n * dt - delay) * (n * dt - delay) / (width * width));
 
+        
         /* Stage 1: Source */
         //stageSource(V1, V2, V3, V4, Ein[0], Ein[1], E0, NY);
 
+        
         /* Stage 2: Scatter */
         //stageScatter(V1, V2, V3, V4, NX, NY, Z);
         scatterKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX, NY, Z, Ein[0], Ein[1], E0);
 
+        
         /* Stage 3: Connect */
         //stageConnect(V1, V2, V3, V4, NX, NY, rXmin, rXmax, rYmin, rYmax);
         connectKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX, NY, rXmin, rXmax, rYmin, rYmax);
 
 
         /* Stage 4: Retrieval */
-
+        //*/
         // Copy output vector from GPU buffer to host memory.
         cudaStatus = cudaMemcpy(V1, gpu_v1, NX * NY * sizeof(double), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
         if (cudaStatus != cudaSuccess) {
@@ -322,6 +332,8 @@ int main() {
             return cudaStatus;
         }
         //    std::cout << "cudaMemcpy success" << std::endl;
+        //*/
+
 
         /* Stage 5: Output */
 
@@ -329,7 +341,8 @@ int main() {
         if (n % 100 == 0)
             std::cout << n << std::endl;
 
-    }
+    } // End of loop
+
     cudaFree(gpu_v1);
     cudaFree(gpu_v2);
     cudaFree(gpu_v3);
