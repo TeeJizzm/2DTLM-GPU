@@ -151,9 +151,31 @@ __global__ void connectKernel(double* V1, double* V2, double* V3, double* V4, in
     // Thread identities
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned int stride = blockDim.x * gridDim.x;
-    //*/
-    
 
+    //*/ // Connect internals
+    for (size_t i = tid + NY; i < (NX * NY); i += stride) {
+        tempV = V2[i];
+        V2[i] = V4[i - NY];
+        V4[i - NY] = tempV;
+        __syncthreads();
+    }
+    for (size_t i = tid + 1; i < (NX * NY); i += stride) {
+        tempV = V1[i] = V3[i - 1];
+        V3[i - 1] = tempV;
+        __syncthreads();
+    }
+
+    //*/ // Connect boundaries
+    for (size_t i = tid; i < NX; i += stride) {
+
+
+    }
+    for (size_t i = tid; i < NY; i += stride) {
+
+
+    }
+
+    //*/
 
 }
 
@@ -186,10 +208,10 @@ int main() {
     double* v4; // send to GPU
     
     // Retrieval from GPU
-    double* V1 = new double[int(NX * NY)];
-    double* V2 = new double[int(NX * NY)];
-    double* V3 = new double[int(NX * NY)];
-    double* V4 = new double[int(NX * NY)];
+    double* V1 = new double[int(NX * NY)](); // new double[int(NX*NY)](); // Sets all values to 0 
+    double* V2 = new double[int(NX * NY)]();
+    double* V3 = new double[int(NX * NY)](); // new double[int(NX*NY)]; // Creates array for GPU retrieval
+    double* V4 = new double[int(NX * NY)]();
     
     // Scatter Coefficient
     double Z = eta0 / sqrt(2.);
@@ -227,8 +249,13 @@ int main() {
     cudaStatus = cudaDeviceSynchronize();
     checkError(cudaStatus);
 
-    // Zero values on GPU - faster than copying array data
-
+    // Zero values on GPU - faster than copying array of 0's
+    zeroesKernel << < numBlocks, numThreads >> > (v1, v2, v3, v4, NX*NY);
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) { // throws any errors encountered
+        std::cout << stderr << " :: cudaDeviceSynchronize returned error code: " << cudaStatus << std::endl;
+        return cudaStatus;
+    }
 
     for (int n = 0; n < NT; n++) {
         // Variables dependant on n
