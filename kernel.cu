@@ -25,16 +25,16 @@ void checkError(cudaError cudaStatus)
 }
 
 // GPU kernel
-__global__ void zeroesKernel(double* v1, double* v2, double* v3, double* v4, const int n) {
+__global__ void zeroesKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, double* gpu_v4, const int n) {
     // divide work amongst threads and blocks
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned int stride = blockDim.x * gridDim.x;
     //*/
     for (size_t i = tid + stride; i < n; i += stride) {
-        v1[i] = 0;
-        v2[i] = 0;
-        v3[i] = 0;
-        v4[i] = 0;
+        gpu_v1[i] = 0;
+        gpu_v2[i] = 0;
+        gpu_v3[i] = 0;
+        gpu_v4[i] = 0;
         __syncthreads();
     }
     //*/
@@ -85,17 +85,23 @@ void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY
 __global__ void scatterKernel(double* V1, double* V2, double* V3, double* V4, // Arrays
                                 const int NX, const int NY, const double Z,  // Array arguments + scatter variables
                                 const int Ex, const int Ey, const double E0) { // Source variables
-
-    V1[Ex * NY + Ey] = V1[Ex * NY + Ey] + E0;
-    V2[Ex * NY + Ey] = V2[Ex * NY + Ey] - E0;
-    V3[Ex * NY + Ey] = V3[Ex * NY + Ey] - E0;
-    V4[Ex * NY + Ey] = V4[Ex * NY + Ey] + E0;
-
-    // Variables
+    
+        // Variables
     double I = 0, V = 0;
     // Thread identities
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned int stride = blockDim.x * gridDim.x;
+
+    // Source function moved to this kernel
+    if (tid == 0) {
+        V1[Ex * NY + Ey] = V1[Ex * NY + Ey] + E0;
+        V2[Ex * NY + Ey] = V2[Ex * NY + Ey] - E0;
+        V3[Ex * NY + Ey] = V3[Ex * NY + Ey] - E0;
+        V4[Ex * NY + Ey] = V4[Ex * NY + Ey] + E0;
+    }
+    __syncthreads();
+
+
     //*/
     for (size_t i = tid; i < NX*NY; i += stride) {
         V = 2 * V1[i] - I * Z;         //port1
@@ -110,6 +116,7 @@ __global__ void scatterKernel(double* V1, double* V2, double* V3, double* V4, //
         V = 2 * V4[i] - I * Z;         //port4
         V4[i] = V - V4[i];
     
+        __syncthreads();
     }
 } // end kern
 
@@ -177,10 +184,12 @@ __global__ void connectKernel(double* V1, double* V2, double* V3, double* V4,
     for (size_t x = tid; x < NX; x += stride) {
         V3[x * NY + NY - 1] = rYmax * V3[x * NY + NY - 1];
         V1[x * NY] = rYmin * V1[x * NY]; // V1[x * NY + 0] = rYmin * V1[x * NY + 0];
+        __syncthreads();
     }
     for (size_t y = tid; y < NY; y += stride) {
         V4[(NX - 1) * NY + y] = rXmax * V4[(NX - 1) * NY + y];
         V2[y] = rXmin * V2[y]; // V2[0 * NY + y] = rXmin * V2[0 * NY + y];
+        __syncthreads();
     }
 
     //*/
@@ -207,19 +216,21 @@ int main() {
 
      // find no of blocks
     int numThreads = properties.maxThreadsPerBlock;
-    int numBlocks = ((NX*NY) + numThreads - 1) / numThreads;
+    int numBlocks = ((NX * NY) + numThreads - 1) / numThreads;
 
     double dt = dl / (sqrt(2.) * c);
-    double* v1;
-    double* v2;
-    double* v3;
-    double* v4; // send to GPU
+
+    // Send to GPU
+    double* gpu_v1;
+    double* gpu_v2;
+    double* gpu_v3;
+    double* gpu_v4;
     
     // Retrieval from GPU
-    double* V1 = new double[int(NX * NY)](); // new double[int(NX*NY)](); // Sets all values to 0 
-    double* V2 = new double[int(NX * NY)]();
-    double* V3 = new double[int(NX * NY)](); // new double[int(NX*NY)]; // Creates array for GPU retrieval
-    double* V4 = new double[int(NX * NY)]();
+    double* V1 = new double[int(NX * NY)]; // new double[int(NX*NY)](); // Sets all values to 0 
+    double* V2 = new double[int(NX * NY)];
+    double* V3 = new double[int(NX * NY)]; // new double[int(NX*NY)]; // Creates array for GPU retrieval
+    double* V4 = new double[int(NX * NY)];
     
     // Scatter Coefficient
     double Z = eta0 / sqrt(2.);
@@ -238,27 +249,27 @@ int main() {
     int Eout[] = { 15,15 };
 
     // file output
-    std::ofstream output("CPU.csv");
+    std::ofstream output("GPU.csv");
 
 
     // Initialise GPU
     cudaStatus = cudaDeviceSynchronize();
     checkError(cudaStatus);
 
-    cudaStatus = cudaMalloc(&v1, NX * NY * sizeof(double)); // Memory allocate for points array
+    cudaStatus = cudaMalloc((void**)&gpu_v1, (NX * NY * sizeof(double))); // Memory allocate for points array
     checkError(cudaStatus);
-    cudaStatus = cudaMalloc(&v2, NX * NY * sizeof(double)); // Memory allocate for points array
+    cudaStatus = cudaMalloc((void**)&gpu_v2, (NX * NY * sizeof(double))); // Memory allocate for points array
     checkError(cudaStatus);
-    cudaStatus = cudaMalloc(&v3, NX * NY * sizeof(double)); // Memory allocate for points array
+    cudaStatus = cudaMalloc((void**)&gpu_v3, (NX * NY * sizeof(double))); // Memory allocate for points array
     checkError(cudaStatus);
-    cudaStatus = cudaMalloc(&v4, NX * NY * sizeof(double)); // Memory allocate for points array
+    cudaStatus = cudaMalloc((void**)&gpu_v4, (NX * NY * sizeof(double))); // Memory allocate for points array
     checkError(cudaStatus);
 
     cudaStatus = cudaDeviceSynchronize();
     checkError(cudaStatus);
 
     // Zero values on GPU - faster than copying array of 0's
-    zeroesKernel << < numBlocks, numThreads >> > (v1, v2, v3, v4, NX*NY);
+    zeroesKernel << < numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX*NY);
     cudaStatus = cudaDeviceSynchronize();
     if (cudaStatus != cudaSuccess) { // throws any errors encountered
         std::cout << stderr << " :: cudaDeviceSynchronize returned error code: " << cudaStatus << std::endl;
@@ -270,26 +281,59 @@ int main() {
         double E0 = (1 / sqrt(2.)) * exp(-(n * dt - delay) * (n * dt - delay) / (width * width));
 
         /* Stage 1: Source */
-        stageSource(V1, V2, V3, V4, Ein[0], Ein[1], E0, NY);
+        //stageSource(V1, V2, V3, V4, Ein[0], Ein[1], E0, NY);
 
         /* Stage 2: Scatter */
-        stageScatter(V1, V2, V3, V4, NX, NY, Z);
-        //scatterKernel << <numBlocks, numThreads >> > (v1, v2, v3, v4, NX, NY, Z, Ein[0], Ein[1], E0);
+        //stageScatter(V1, V2, V3, V4, NX, NY, Z);
+        scatterKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX, NY, Z, Ein[0], Ein[1], E0);
 
         /* Stage 3: Connect */
-        
-        stageConnect(V1, V2, V3, V4, NX, NY, rXmin, rXmax, rYmin, rYmax);
-        //connectKernel << <numBlocks, numThreads >> > (V1, V2, V3, V4, NX, NY, rXmin, rXmax, rYmin, rYmax);
+        //stageConnect(V1, V2, V3, V4, NX, NY, rXmin, rXmax, rYmin, rYmax);
+        connectKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX, NY, rXmin, rXmax, rYmin, rYmax);
+
+
+        /* Stage 4: Retrieval */
+
+        // Copy output vector from GPU buffer to host memory.
+        cudaStatus = cudaMemcpy(V1, gpu_v1, NX * NY * sizeof(double), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
+        if (cudaStatus != cudaSuccess) {
+            std::cout << stderr << " :: cudaMemcpy failed!" << std::endl;
+            return cudaStatus;
+        }
+        //    std::cout << "cudaMemcpy success" << std::endl;
+                // Copy output vector from GPU buffer to host memory.
+        cudaStatus = cudaMemcpy(V2, gpu_v2, NX * NY * sizeof(double), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
+        if (cudaStatus != cudaSuccess) {
+            std::cout << stderr << " :: cudaMemcpy failed!" << std::endl;
+            return cudaStatus;
+        }
+        //    std::cout << "cudaMemcpy success" << std::endl;
+                // Copy output vector from GPU buffer to host memory.
+        cudaStatus = cudaMemcpy(V3, gpu_v3, NX * NY * sizeof(double), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
+        if (cudaStatus != cudaSuccess) {
+            std::cout << stderr << " :: cudaMemcpy failed!" << std::endl;
+            return cudaStatus;
+        }
+        //    std::cout << "cudaMemcpy success" << std::endl;
+                // Copy output vector from GPU buffer to host memory.
+        cudaStatus = cudaMemcpy(V4, gpu_v4, NX * NY * sizeof(double), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
+        if (cudaStatus != cudaSuccess) {
+            std::cout << stderr << " :: cudaMemcpy failed!" << std::endl;
+            return cudaStatus;
+        }
+        //    std::cout << "cudaMemcpy success" << std::endl;
+
+        /* Stage 5: Output */
 
         output << n * dt << "  " << V2[Eout[0] * NY + Eout[1]] + V4[Eout[0] * NY + Eout[1]] << std::endl;
         if (n % 100 == 0)
             std::cout << n << std::endl;
 
     }
-    cudaFree(v1);
-    cudaFree(v2);
-    cudaFree(v3);
-    cudaFree(v4);
+    cudaFree(gpu_v1);
+    cudaFree(gpu_v2);
+    cudaFree(gpu_v3);
+    cudaFree(gpu_v4);
 
     output.close();
     std::cout << "Done: " << ((std::clock() - start) / (double)CLOCKS_PER_SEC) << std::endl;
