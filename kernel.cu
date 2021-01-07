@@ -85,22 +85,24 @@ void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY
 __global__ void scatterKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, double* gpu_v4, // Arrays
                                 const int NX, const int NY, const double Z,  // Array arguments + scatter variables
                                 const int Ex, const int Ey, const double E0) { // Source function variables
-    
+
         // Variables
     double V = 0; // V is a temp variable
     // Thread identities
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned int stride = blockDim.x * gridDim.x;
 
+    /* Stage 1: Source */
+
     // Source function moved to this kernel, 
-    if (tid == 0) {
-        gpu_v1[Ex * NY + Ey] = gpu_v1[Ex * NY + Ey] + E0;
-        gpu_v2[Ex * NY + Ey] = gpu_v2[Ex * NY + Ey] - E0;
-        gpu_v3[Ex * NY + Ey] = gpu_v3[Ex * NY + Ey] - E0;
-        gpu_v4[Ex * NY + Ey] = gpu_v4[Ex * NY + Ey] + E0;
-    }
+    if (tid == 0) gpu_v1[Ex * NY + Ey] = gpu_v1[Ex * NY + Ey] + E0;
+    if (tid == 1) gpu_v2[Ex * NY + Ey] = gpu_v2[Ex * NY + Ey] - E0;
+    if (tid == 2) gpu_v3[Ex * NY + Ey] = gpu_v3[Ex * NY + Ey] - E0;
+    if (tid == 3) gpu_v4[Ex * NY + Ey] = gpu_v4[Ex * NY + Ey] + E0;
     __syncthreads();
 
+
+    /* Stage 2: Scatter */
 
     //*/
     for (size_t i = tid; i < NX*NY; i += stride) {
@@ -164,17 +166,18 @@ void stageConnect(double* V1, double* V2, double* V3, double* V4, // Arrays
 __global__ void connectKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, double* gpu_v4, double* gpu_out, // arrays
     const int NX, const int NY, const int n, const int Ex, const int Ey, // array variables
     const double rXmin, const double rXmax, const double rYmin, const double rYmax) { // boundary variables
-/* Stage 3: Connect */
-// Variables
-    double tempV = 0; // temporary variable for swapping values
 
+/* Stage 3: Connect */
+
+    // Variables
+    double tempV = 0; // temporary variable for swapping values
 
     // Thread identities
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned int stride = blockDim.x * gridDim.x;
 
-    //*/ // Connect ports 2 and 4
-    for (size_t i = tid + NY; i < (NX * NY); i += stride) { // Loop only through nodes where X > 0
+    // Connect ports 2 and 4
+    for (size_t i = (tid + NY); i < (NX * NY); i += stride) { // Loop only through nodes where X > 0
         tempV = gpu_v2[i];
         gpu_v2[i] = gpu_v4[i - NY];
         gpu_v4[i - NY] = tempV;
@@ -192,18 +195,16 @@ __global__ void connectKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, do
     }
     __syncthreads(); // Sync
 
-    //*/ // Connect boundaries
+    // Connect boundaries
     for (size_t x = tid; x < NX; x += stride) {
         gpu_v3[x * NY + NY - 1] = rYmax * gpu_v3[x * NY + NY - 1];
         gpu_v1[x * NY] = rYmin * gpu_v1[x * NY]; // V1[x * NY + 0] = rYmin * V1[x * NY + 0];
-        __syncthreads(); // Sync
     }
+    __syncthreads(); // Sync between loops
     for (size_t y = tid; y < NY; y += stride) {
         gpu_v4[(NX - 1) * NY + y] = rXmax * gpu_v4[(NX - 1) * NY + y];
         gpu_v2[y] = rXmin * gpu_v2[y]; // V2[0 * NY + y] = rXmin * V2[0 * NY + y];
-        __syncthreads(); // Sync
     }
-    //*/
     __syncthreads(); // Sync between loops
 
     /* Saving data */
@@ -238,7 +239,7 @@ int main() {
     double dt = dl / (sqrt(2.) * c);
 
     // Send to GPU
-    double* gpu_v1; // >
+    double* gpu_v1; // 
     double* gpu_v2; // 
     double* gpu_v3; //
     double* gpu_v4; // > Arrays for data points
@@ -294,48 +295,32 @@ int main() {
     // Zero values on GPU - faster than copying array of 0's
     zeroesKernel << < numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX*NY);
     cudaStatus = cudaDeviceSynchronize();
-    if (cudaStatus != cudaSuccess) { // throws any errors encountered
-        std::cout << stderr << " :: cudaDeviceSynchronize returned error code: " << cudaStatus << std::endl;
-        return cudaStatus;
-    }
-
+    checkError(cudaStatus);
 
     for (int n = 0; n < NT; n++) {
         // Variables dependant on n
         double E0 = (1 / sqrt(2.)) * exp(-(n * dt - delay) * (n * dt - delay) / (width * width));
 
-        
-        /* Stage 1: Source */
-        //stageSource(V1, V2, V3, V4, Ein[0], Ein[1], E0, NY);
-
-        
-        /* Stage 2: Scatter */
-        //stageScatter(V1, V2, V3, V4, NX, NY, Z);
+        /* Stages 1 and 2 */
         scatterKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX, NY, Z, Ein[0], Ein[1], E0);
-        cudaStatus = cudaPeekAtLastError();
-        checkError(cudaStatus);
         cudaStatus = cudaDeviceSynchronize();
         checkError(cudaStatus);
 
-        /* Stage 3: Connect */
-        //stageConnect(V1, V2, V3, V4, NX, NY, rXmin, rXmax, rYmin, rYmax);
-        connectKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, gpu_out, NX, NY, n, Ein[0], Ein[1], rXmin, rXmax, rYmin, rYmax);
+        /* Stage 3 and output saving */
+        connectKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, gpu_out, NX, NY, n, Eout[0], Eout[1], rXmin, rXmax, rYmin, rYmax);
         cudaStatus = cudaDeviceSynchronize();
         checkError(cudaStatus);
 
-
+        /* Debugging */
         if (n % 100 == 0) std::cout << n << std::endl;
 
     } // End of loop
 
-
     /* Stage 4: Output */
-
-    // Copy output array from GPU buffer to host memory.
     cudaStatus = cudaMemcpy(h_out, gpu_out, (NT * sizeof(double)), cudaMemcpyDeviceToHost); // Memory Copy back to CPU
     checkError(cudaStatus);
 
-    // Output timing and value of Eout point
+    // Output timing and voltage at Eout point
     for (int i = 0; i < NT; ++i) {
         output << i * dt << "," << h_out[i] << std::endl;
     }
@@ -347,10 +332,10 @@ int main() {
     cudaFree(gpu_v4);
     cudaFree(gpu_out);
 
+    // Tidying up
     output.close();
     std::cout << "Done: " << ((std::clock() - start) / (double)CLOCKS_PER_SEC) << std::endl;
     std::cin.get();
-
 
 } // end main
 
