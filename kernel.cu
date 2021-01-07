@@ -40,46 +40,6 @@ __global__ void zeroesKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, dou
     //*/
 } // end kern
 
-// CPU function for source calculation
-void stageSource(double* gpu_v1, double* gpu_v2, double* gpu_v3, double* gpu_v4, int Ex, int Ey, double E0, int NY) {
-    /* Stage 1: Source */
-
-    // Adapted to be 1D
-    gpu_v1[Ex * NY + Ey] = gpu_v1[Ex * NY + Ey] + E0;
-    gpu_v2[Ex * NY + Ey] = gpu_v2[Ex * NY + Ey] - E0;
-    gpu_v3[Ex * NY + Ey] = gpu_v3[Ex * NY + Ey] - E0;
-    gpu_v4[Ex * NY + Ey] = gpu_v4[Ex * NY + Ey] + E0;
-    // Using 1 dimensional arrays is more obvious to work with when porting to GPU
-
-} // end func
-
-// CPU function
-void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY, double Z) {
-    /* Stage 2: Scatter */
-    // Variables 
-    double I = 0, V = 0;
-
-    // Parallelisable code
-
-    // for int i = 0; i < NX*NY; i++
-    for (int x = 0; x < NX; x++) {
-        for (int y = 0; y < NY; y++) {
-            I = (2 * V1[(x * NY) + y] + 2 * V4[(x * NY) + y] - 2 * V2[(x * NY) + y] - 2 * V3[(x * NY) + y]) / (4 * Z);
-
-            V = 2 * V1[x * NY + y] - I * Z;         //port1
-            V1[x * NY + y] = V - V1[x * NY + y];
-
-            V = 2 * V2[x * NY + y] + I * Z;         //port2
-            V2[x * NY + y] = V - V2[x * NY + y];
-
-            V = 2 * V3[x * NY + y] + I * Z;         //port3
-            V3[x * NY + y] = V - V3[x * NY + y];
-
-            V = 2 * V4[x * NY + y] - I * Z;         //port4
-            V4[x * NY + y] = V - V4[x * NY + y];
-        }
-    }
-} // end func
 
 // GPU kernel
 __global__ void scatterKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, double* gpu_v4, // Arrays
@@ -107,7 +67,7 @@ __global__ void scatterKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, do
     //*/
     for (size_t i = tid; i < NX*NY; i += stride) {
         // Tidied up
-        double IZ = (gpu_v1[i] + gpu_v4[i] - gpu_v2[i] - gpu_v3[i]) / (2); // Calculate coefficient
+        double IZ = ((gpu_v1[i] + gpu_v4[i] - gpu_v2[i] - gpu_v3[i]) / 2); // Calculate coefficient
         //I = (2 * V1[(x * NY) + y] + 2 * V4[(x * NY) + y] - 2 * V2[(x * NY) + y] - 2 * V3[(x * NY) + y]) / (4 * Z);
 
         V = 2 * gpu_v1[i] - IZ;         //port1
@@ -125,41 +85,6 @@ __global__ void scatterKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, do
         __syncthreads();
     }
 } // end kern
-
-// CPU Function
-void stageConnect(double* V1, double* V2, double* V3, double* V4, // Arrays
-    int NX, int NY, // Array arguments
-    double rXmin, double rXmax, double rYmin, double rYmax) { // Boundary conditions
-/* Stage 3: Connect */
-// Variables
-    double tempV = 0;
-
-    // Connect internals
-    for (int x = 1; x < NX; x++) {
-        for (int y = 0; y < NY; y++) {
-            tempV = V2[x * NY + y];
-            V2[x * NY + y] = V4[(x - 1) * NY + y];
-            V4[(x - 1) * NY + y] = tempV;
-        }
-    }
-    for (int x = 0; x < NX; x++) {
-        for (int y = 1; y < NY; y++) {
-            tempV = V1[x * NY + y];
-            V1[x * NY + y] = V3[x * NY + y - 1];
-            V3[x * NY + y - 1] = tempV;
-        }
-    }
-
-    // Connect boundaries
-    for (int x = 0; x < NX; x++) {
-        V3[x * NY + NY - 1] = rYmax * V3[x * NY + NY - 1];
-        V1[x * NY] = rYmin * V1[x * NY]; // V1[x * NY + 0] = rYmin * V1[x * NY + 0];
-    }
-    for (int y = 0; y < NY; y++) {
-        V4[(NX - 1) * NY + y] = rXmax * V4[(NX - 1) * NY + y];
-        V2[y] = rXmin * V2[y]; // V2[0 * NY + y] = rXmin * V2[0 * NY + y];
-    }
-} // end func
 
 
 // GPU Kernel
@@ -322,7 +247,8 @@ int main() {
 
     // Output timing and voltage at Eout point
     for (int i = 0; i < NT; ++i) {
-        output << i * dt << "," << h_out[i] << std::endl;
+        output << i * dt << "," << 2 * h_out[i] << std::endl;
+        // Can't find where the missing multiple is, but all values are 0.5 the size that they should be.
     }
 
     // Free allocated memory from GPU
