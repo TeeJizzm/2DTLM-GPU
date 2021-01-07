@@ -84,15 +84,15 @@ void stageScatter(double* V1, double* V2, double* V3, double* V4, int NX, int NY
 // GPU kernel
 __global__ void scatterKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, double* gpu_v4, // Arrays
                                 const int NX, const int NY, const double Z,  // Array arguments + scatter variables
-                                const int Ex, const int Ey, const double E0) { // Source variables
+                                const int Ex, const int Ey, const double E0) { // Source function variables
     
         // Variables
-    double I = 0, V = 0; // V is a temp variable, I is dependant on the array address
+    double V = 0; // V is a temp variable
     // Thread identities
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned int stride = blockDim.x * gridDim.x;
 
-    // Source function moved to this kernel
+    // Source function moved to this kernel, 
     if (tid == 0) {
         gpu_v1[Ex * NY + Ey] = gpu_v1[Ex * NY + Ey] + E0;
         gpu_v2[Ex * NY + Ey] = gpu_v2[Ex * NY + Ey] - E0;
@@ -104,19 +104,20 @@ __global__ void scatterKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, do
 
     //*/
     for (size_t i = tid; i < NX*NY; i += stride) {
-        I = (2 * gpu_v1[i] + 2 * gpu_v4[i] - 
-             2 * gpu_v2[i] - 2 * gpu_v3[i]) / (4 * Z);
+        // Tidied up
+        double IZ = (gpu_v1[i] + gpu_v4[i] - gpu_v2[i] - gpu_v3[i]) / (2); // Calculate coefficient
+        //I = (2 * V1[(x * NY) + y] + 2 * V4[(x * NY) + y] - 2 * V2[(x * NY) + y] - 2 * V3[(x * NY) + y]) / (4 * Z);
 
-        V = 2 * gpu_v1[i] - I * Z;         //port1
+        V = 2 * gpu_v1[i] - IZ;         //port1
         gpu_v1[i] = V - gpu_v1[i];
 
-        V = 2 * gpu_v2[i] + I * Z;         //port2
+        V = 2 * gpu_v2[i] + IZ;         //port2
         gpu_v2[i] = V - gpu_v2[i];
 
-        V = 2 * gpu_v3[i] + I * Z;         //port3
+        V = 2 * gpu_v3[i] + IZ;         //port3
         gpu_v3[i] = V - gpu_v3[i];
 
-        V = 2 * gpu_v4[i] - I * Z;         //port4
+        V = 2 * gpu_v4[i] - IZ;         //port4
         gpu_v4[i] = V - gpu_v4[i];
     
         __syncthreads();
@@ -166,21 +167,26 @@ __global__ void connectKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, do
 /* Stage 3: Connect */
 // Variables
     double tempV = 0; // temporary variable for swapping values
+
+
     // Thread identities
     unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned int stride = blockDim.x * gridDim.x;
 
-    //*/ // Connect internals
+    //*/ // Connect ports 2 and 4
     for (size_t i = tid + NY; i < (NX * NY); i += stride) { // Loop only through nodes where X > 0
         tempV = gpu_v2[i];
         gpu_v2[i] = gpu_v4[i - NY];
         gpu_v4[i - NY] = tempV;
     }
     __syncthreads(); // Sync between loops
+
+    // Connect ports 1 and 3
     for (size_t i = tid + 1; i < (NX * NY); i += stride) { // Loop only through nodes where Y > 0
         // Skip when finding y = 0
         if (i % NY != 0) {
-            tempV = gpu_v1[i] = gpu_v3[i - 1];
+            tempV = gpu_v1[i];
+            gpu_v1[i] = gpu_v3[i - 1];
             gpu_v3[i - 1] = tempV;
         }
     }
