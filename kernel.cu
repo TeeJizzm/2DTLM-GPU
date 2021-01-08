@@ -42,7 +42,7 @@ __global__ void zeroesKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, dou
 
 // GPU kernel
 __global__ void scatterKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, double* gpu_v4, // Arrays
-                                const int NX, const int NY, const double Z,  // Array arguments + scatter variables
+                                const int NX, const int NY,  // Array arguments
                                 const int Ex, const int Ey, const double E0) { // Source function variables
 
         // Variables
@@ -66,19 +66,19 @@ __global__ void scatterKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, do
     //*/
     for (size_t i = tid; i < NX*NY; i += stride) {
         // Tidied up
-        double IZ = ((gpu_v1[i] + gpu_v4[i] - gpu_v2[i] - gpu_v3[i]) / 2); // Calculate coefficient
+        double I = ((gpu_v1[i] + gpu_v4[i] - gpu_v2[i] - gpu_v3[i]) / 2); // Calculate coefficient
         //I = (2 * V1[(x * NY) + y] + 2 * V4[(x * NY) + y] - 2 * V2[(x * NY) + y] - 2 * V3[(x * NY) + y]) / (4 * Z);
 
-        V = 2 * gpu_v1[i] - IZ;         //port1
+        V = 2 * gpu_v1[i] - I;         //port1
         gpu_v1[i] = V - gpu_v1[i];
 
-        V = 2 * gpu_v2[i] + IZ;         //port2
+        V = 2 * gpu_v2[i] + I;         //port2
         gpu_v2[i] = V - gpu_v2[i];
 
-        V = 2 * gpu_v3[i] + IZ;         //port3
+        V = 2 * gpu_v3[i] + I;         //port3
         gpu_v3[i] = V - gpu_v3[i];
 
-        V = 2 * gpu_v4[i] - IZ;         //port4
+        V = 2 * gpu_v4[i] - I;         //port4
         gpu_v4[i] = V - gpu_v4[i];
     
         __syncthreads();
@@ -146,8 +146,8 @@ int main() {
 
     /* Variables */
     // Changable variables
-    int NX = 200; // number of X
-    int NY = 200; // number of Y
+    int NX = 1500; // number of X
+    int NY = 1500; // number of Y
     int NT = 1000; // number of Times/Iterations
     double dl = 1;
 
@@ -177,7 +177,7 @@ int main() {
     double* V3 = new double[int(NX * NY)]; 
     double* V4 = new double[int(NX * NY)];
     //*/
-    double* h_out = new double[NT]();
+    double* h_out = new double[NT](); // initialise and set to 0
 
     // Scatter Coefficient -- unused
     //double Z = eta0 / sqrt(2.);
@@ -226,7 +226,7 @@ int main() {
         double E0 = (1 / sqrt(2.)) * exp(-(n * dt - delay) * (n * dt - delay) / (width * width));
 
         /* Stages 1 and 2 */
-        scatterKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX, NY, Z, Ein[0], Ein[1], E0);
+        scatterKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX, NY, Ein[0], Ein[1], E0);
         cudaStatus = cudaDeviceSynchronize();
         checkError(cudaStatus);
 
@@ -246,8 +246,7 @@ int main() {
 
     // Output timing and voltage at Eout point
     for (int i = 0; i < NT; ++i) {
-        output << i * dt << "," << 2 * h_out[i] << std::endl;
-        // Can't find where the missing multiple is, but all values are 0.5 the size that they should be.
+        output << i * dt << "," << 2* h_out[i] << std::endl;
     }
 
     // Free allocated memory from GPU
