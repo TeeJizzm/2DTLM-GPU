@@ -8,10 +8,10 @@
 #include <fstream>
 #include <ctime>
 
-#define M_PI 3.14276
+//#define M_PI 3.14276 // unused
 #define c 299792458
-#define mu0 M_PI*4e-7
-#define eta0 c*mu0
+//#define mu0 M_PI*4e-7 // unused
+//#define eta0 c*mu0 // unused
 
 // GPU error checking
 void checkError(cudaError cudaStatus)
@@ -131,7 +131,7 @@ __global__ void connectKernel(double* gpu_v1, double* gpu_v2, double* gpu_v3, do
     }
     __syncthreads(); // Sync between loops
 
-    /* Saving data */
+    /* Stage 4: Output */
     if (tid == 0) {
         gpu_out[n] = gpu_v2[Ex * NY + Ey] + gpu_v4[Ex * NY + Ey];
     }
@@ -144,13 +144,15 @@ int main() {
     // Start timer
     std::clock_t start = std::clock();
 
-    /* Variables */
+    /* Stage 0: Setup and Variables */
+
     // Changable variables
-    int NX = 1500; // number of X
-    int NY = 1500; // number of Y
-    int NT = 1000; // number of Times/Iterations
+    int NX = 100; // number of X
+    int NY = 100; // number of Y
+    int NT = 8192; // number of Times/Iterations
     double dl = 1;
 
+    // CUDA/ GPU dependant variables
     cudaError_t cudaStatus;
     cudaStatus = cudaSetDevice(0); // Error checking
     cudaDeviceProp properties;
@@ -223,14 +225,14 @@ int main() {
 
     for (int n = 0; n < NT; n++) {
         // Variables dependant on n
-        double E0 = (1 / sqrt(2.)) * exp(-(n * dt - delay) * (n * dt - delay) / (width * width));
+        double E0 = (1 / sqrt(2.)) * exp(-(n * dt - delay) * (n * dt - delay) / (width * width)); // Finds where impulse is in time
 
         /* Stages 1 and 2 */
         scatterKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, NX, NY, Ein[0], Ein[1], E0);
         cudaStatus = cudaDeviceSynchronize();
         checkError(cudaStatus);
 
-        /* Stage 3 and output saving */
+        /* Stages 3 and 4 */
         connectKernel << <numBlocks, numThreads >> > (gpu_v1, gpu_v2, gpu_v3, gpu_v4, gpu_out, NX, NY, n, Eout[0], Eout[1], rXmin, rXmax, rYmin, rYmax);
         cudaStatus = cudaDeviceSynchronize();
         checkError(cudaStatus);
@@ -246,7 +248,7 @@ int main() {
 
     // Output timing and voltage at Eout point
     for (int i = 0; i < NT; ++i) {
-        output << i * dt << "," << 2* h_out[i] << std::endl;
+        output << i * dt << "," << h_out[i] << std::endl; // Writes to file in comma delimited format
     }
 
     // Free allocated memory from GPU
