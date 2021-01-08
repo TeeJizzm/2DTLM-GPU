@@ -8,7 +8,6 @@
 #include <fstream>
 #include <ctime>
 
-// Definitions
 #define M_PI 3.14276
 #define c 299792458
 #define mu0 M_PI*4e-7
@@ -161,7 +160,7 @@ int main() {
     int numThreads = properties.maxThreadsPerBlock;
     int numBlocks = ((NX * NY) + numThreads - 1) / numThreads;
 
-    double dt = dl / (sqrt(2.) * c);
+    double dt = dl / (sqrt(2.) * c); // Time step size
 
     // Send to GPU
     double* gpu_v1; // 
@@ -171,16 +170,17 @@ int main() {
     double* gpu_out;
     
     // Retrieval from GPU
+    // Not required to be stored on CPU
     /*/
-    double* V1 = new double[int(NX * NY)]; // new double[int(NX*NY)]; // Creates array for GPU retrieval
+    double* V1 = new double[int(NX * NY)]; // Creates array for GPU retrieval
     double* V2 = new double[int(NX * NY)];
     double* V3 = new double[int(NX * NY)]; 
     double* V4 = new double[int(NX * NY)];
     //*/
     double* h_out = new double[NT]();
 
-    // Scatter Coefficient
-    double Z = eta0 / sqrt(2.);
+    // Scatter Coefficient -- unused
+    //double Z = eta0 / sqrt(2.);
 
     // Boundary connect Coefficiants
     double rXmin = -1;
@@ -189,15 +189,14 @@ int main() {
     double rYmax = -1;
 
     // input parameters
-    double width = 20 * dt * sqrt(2.);
-    double delay = 100 * dt * sqrt(2.);
-    int Ein[] = { 10,10 };
+    double width = 20 * dt * sqrt(2.); // width of impulse
+    double delay = 100 * dt * sqrt(2.); // delay before impulse
+    int Ein[] = { 10,10 }; // input position
     // output parameters
-    int Eout[] = { 15,15 };
+    int Eout[] = { 15,15 }; // read position
 
     // file output
     std::ofstream output("GPU.csv");
-
 
     // Initialise GPU
     cudaStatus = cudaDeviceSynchronize();
